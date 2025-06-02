@@ -1,0 +1,39 @@
+bison -ldt -o validacion_instrucciones.cpp validacion.y
+flex -L encriptador_desencriptador.l
+c++ validacion_instrucciones.cpp encriptador_desencriptador.cpp -o encriptador_desencriptador -Wall -Wextra
+encriptador_desencriptador.cpp:1325:38: warning: comparison of integers of different signs: 'yy_size_t' (aka 'unsigned long') and 'int' [-Wsign-compare]
+ 1325 |         if (((yy_n_chars) + number_to_move) > YY_CURRENT_BUFFER_LVALUE->yy_buf_size) {
+      |              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+encriptador_desencriptador.cpp:2098:58: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+ 2098 |                     fprintf(stderr, "Error: Arreglo de sustituci<F3>n lleno o sin posiciones v<E1>lidas.\n");
+      |                                                                 ^~~~                          ~~~~
+encriptador_desencriptador.cpp:2091:93: warning: unused parameter 'offset' [-Wunused-parameter]
+ 2091 | void agregar_si_no_existe(unsigned char letra, unsigned char *arr, unsigned int *count, int offset) {
+      |                                                                                             ^
+encriptador_desencriptador.cpp:2123:48: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+ 2123 |         fprintf(stderr, "Error al analizar la l<CC>nea: %s\n", line);
+      |                                                ^~~~
+encriptador_desencriptador.cpp:2158:48: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+ 2158 |         fprintf(stderr, "Error al analizar la l<CC>nea: %s\n", line);
+      |                                                ^~~~
+encriptador_desencriptador.cpp:2252:42: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+ 2252 |         fprintf(stderr, "Error: stack vac<ED>o al volver del archivo FASTA\n");
+      |                                          ^~~~
+encriptador_desencriptador.cpp:1446:16: warning: function 'yyinput' is not needed and will not be emitted [-Wunneeded-internal-declaration]
+ 1446 |     static int yyinput (void)
+      |                ^~~~~~~
+7 warnings generated.
+./encriptador_desencriptador Instruction_to_decode.txt salida_encriptado.txt
+Modo DESENCRIPTADOR:
+Instruccion valida: File1.fasta,10,2,30
+
+Instruccion valida: File2.fasta,15,2,45
+
+
+>> Procesando instruccion 1/2
+offset_encontrado: T (84)
+
+>> Procesando instruccion 2/2
+offset_encontrado: 0 (48)
+
+Archivo desencriptado: salida_desencriptado.txt
