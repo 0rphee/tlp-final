@@ -5,6 +5,7 @@
 #include <ctype.h>
 
 #include "validacion_instrucciones.hpp" 
+
 extern int yyparse(void);
 extern int parsed_ok;
 extern void yy_switch_to_buffer(YY_BUFFER_STATE);
@@ -15,7 +16,6 @@ extern int yydebug;
 
 #define MAX_INSTR 100
 #define ALPHA_SIZE 26
-#define MAX_STACK_SIZE 64
 
 typedef struct {
     char key_path[256];
@@ -23,11 +23,6 @@ typedef struct {
     unsigned int max_attempts;
     unsigned int n_lines;
 } InstructionData;
-
-typedef struct {
-    YY_BUFFER_STATE buffer;
-    long position;  
-} FileState;
 
 InstructionData instrucciones[MAX_INSTR];
 InstructionData *current_instr = NULL;
@@ -37,7 +32,6 @@ unsigned int first_offset = 0;
 unsigned int second_offset = 0;
 unsigned int curr_second_offset = 0;
 unsigned int next_index = 0;
-int offset_encontrado = 0;
 unsigned int lines_decrypted = 0;
 unsigned int lines_encrypted = 0;
 
@@ -47,8 +41,6 @@ const unsigned char DEFAULT_ALPHA_ARR[ALPHA_SIZE] = {
 unsigned char alpha_arr[ALPHA_SIZE] = {0};
 unsigned char reverse_alpha_arr[ALPHA_SIZE] = {0};
 
-FileState file_stack[MAX_STACK_SIZE];
-int stack_ptr = 0;
 FILE *cifrado = NULL;
 FILE *salida_desencriptado = NULL;
 FILE *salida_encriptado = NULL;
@@ -177,8 +169,6 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 <ENCABEZADO>[^\n] {
 	unsigned char c = yytext[0];
 	if (++first_offset == current_instr->first_offset) {
-	        // printf("offset_encontrado: %c (%d)\n", c, c);
-	        offset_encontrado = 1; 
 	        second_offset = c;  
     	}
 }
@@ -187,15 +177,14 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 <FASTA>[^>\n\r ] {
     // printf("No en fasta: %c (%d) %s\n", yytext[0], curr_second_offset+1, curr_second_offset+1 == second_offset ? "true" : "false" );
 	if (++curr_second_offset == second_offset) {
-	        if (!letra_en_arreglo(yytext[0], alpha_arr)) {
-	            agregar_si_no_existe(yytext[0], alpha_arr, &next_index, ALPHA_SIZE);
-	        }
-	        curr_second_offset = 0;  
-    	}
-    	if(next_index == ALPHA_SIZE - 1) {
-        	return 0; 
-    	}
-
+        if (!letra_en_arreglo(yytext[0], alpha_arr)) {
+            agregar_si_no_existe(yytext[0], alpha_arr, &next_index, ALPHA_SIZE);
+        }
+        curr_second_offset = 0;
+	}
+    if(next_index == ALPHA_SIZE - 1) {
+        return 0;
+	}
 }
 
 <FASTA>>.+\n {     }
@@ -367,7 +356,6 @@ int fill_alpha_arr_encrypt(InstructionData *instr) {
     second_offset = 0;
     curr_second_offset = 0;
     next_index = 0;
-    offset_encontrado = 0;
 
     YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
     // Obtener segundo offset
@@ -377,19 +365,6 @@ int fill_alpha_arr_encrypt(InstructionData *instr) {
     yylex();
     fclose(fasta);
     yy_delete_buffer(file_buffer);
-    
-    // // llenar con segundo offset el array
-    // FILE *fasta2 = fopen(instr->key_path, "r");
-    // if (!fasta2) {
-    //     fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", instr->key_path);
-    //     return 0;
-    // }
-    // file_buffer = yy_create_buffer(fasta, YY_BUF_SIZE);
-    // yy_switch_to_buffer(file_buffer);
-    // BEGIN(LLENAR_ARR_FASTA);
-    // yylex();
-    // fclose(fasta);
-    // yy_delete_buffer(file_buffer);
 
     // Resume main buffer
     yy_switch_to_buffer(main_input_buffer);
@@ -397,7 +372,7 @@ int fill_alpha_arr_encrypt(InstructionData *instr) {
 }
 
 int fill_alpha_arr(const char *fasta_path) {
-    // se ignora first_offset_param porque se toma de la variable global, max attempts se ignora también (?)
+    // max attempts se pues la encriptación se encargó de verificarlo
     memcpy(alpha_arr, DEFAULT_ALPHA_ARR, ALPHA_SIZE);
     FILE *fasta = fopen(fasta_path, "r");
     if (!fasta) {
@@ -409,34 +384,20 @@ int fill_alpha_arr(const char *fasta_path) {
     second_offset = 0;
     curr_second_offset = 0;
     next_index = 0;
-    offset_encontrado = 0;
 
-    if (stack_ptr >= MAX_STACK_SIZE) {
-        fprintf(stderr, "Error: Stack de buffers lleno.\n");
-        fclose(fasta);
-        return 0;
-    }
-
-    file_stack[stack_ptr].buffer = YY_CURRENT_BUFFER;
-    file_stack[stack_ptr].position = ftell(yyin);  
-    stack_ptr++;
+    YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
+    long main_buffer_position = ftell(yyin);
 
     yyin = fasta;
-    YY_BUFFER_STATE fasta_buf = yy_create_buffer(yyin, YY_BUF_SIZE);
-    yy_switch_to_buffer(fasta_buf);
+    YY_BUFFER_STATE fasta_buffer = yy_create_buffer(yyin, YY_BUF_SIZE);
+    yy_switch_to_buffer(fasta_buffer);
     BEGIN(INICIO_FASTA);
     yylex();
-
     fclose(fasta);
+    yy_delete_buffer(fasta_buffer);
 
-    if (--stack_ptr < 0) {
-        fprintf(stderr, "Error: stack vacío al volver del archivo FASTA\n");
-        yyterminate();
-    } else {
-        yy_delete_buffer(YY_CURRENT_BUFFER);
-        yy_switch_to_buffer(file_stack[stack_ptr].buffer);
-        fseek(yyin, file_stack[stack_ptr].position, SEEK_SET);
-    }
+    yy_switch_to_buffer(main_input_buffer);
+    fseek(yyin, main_buffer_position, SEEK_SET);
     return 1;
 }
 
