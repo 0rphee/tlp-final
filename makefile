@@ -1,6 +1,7 @@
 BISON = bison
 FLEX = flex
 CXX = c++
+CXX_FLAGS = -Wall -Wextra
 
 # Files
 BISON_SRC = validacion.y
@@ -14,10 +15,10 @@ CXX_OUT = encriptador_desencriptador
 all:
 	$(BISON) -ldt -o $(BISON_OUT) $(BISON_SRC)
 	$(FLEX) -L $(FLEX_SRC)
-	$(CXX) validacion_instrucciones.cpp $(CXX_SRC) -o $(CXX_OUT)
+	$(CXX) validacion_instrucciones.cpp $(CXX_SRC) -o $(CXX_OUT) $(CXX_FLAGS)
 
 decrypt: all
-	./$(CXX_OUT) Instruction_to_decode.txt Original_document.cod
+	./$(CXX_OUT) Instruction_to_decode.txt salida_encriptado.txt
 
 encrypt: all
 	./$(CXX_OUT) Original_document.txt

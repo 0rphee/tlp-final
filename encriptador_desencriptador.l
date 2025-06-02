@@ -39,6 +39,7 @@ unsigned int curr_second_offset = 0;
 unsigned int next_index = 0;
 int offset_encontrado = 0;
 unsigned int lines_decrypted = 0;
+unsigned int lines_encrypted = 0;
 
 const unsigned char DEFAULT_ALPHA_ARR[ALPHA_SIZE] = {
     0, 'Z', 0, 0, 0, 0, 0, 0, 0, 'X', 0, 0, 0, 0, 'U', 0, 0, 0, 0, 0, 'O', 0, 0, 'J', 0, 'B'
@@ -50,13 +51,14 @@ FileState file_stack[MAX_STACK_SIZE];
 int stack_ptr = 0;
 FILE *cifrado = NULL;
 FILE *salida_desencriptado = NULL;
+FILE *salida_encriptado = NULL;
 char instruccion_path[512];
 char base_path[512] = {0};
 
 void print_alpha_arr(const unsigned char arr[ALPHA_SIZE]);
 InstructionData *add_instruction_encrypt(const char *line);
 void add_instruction(const char *line);
-int fill_alpha_arr(const char *fasta_path, unsigned int first_offset_param, unsigned int max_attempts);
+int fill_alpha_arr(const char *fasta_path);
 int fill_alpha_arr_encrypt(InstructionData *instr);
 int letra_en_arreglo(unsigned char letra, const unsigned char arr[ALPHA_SIZE]);
 void agregar_si_no_existe(unsigned char letra, unsigned char *arr, unsigned int *count, int offset);
@@ -102,8 +104,6 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
     yy_delete_buffer(new_buf);
     yy_switch_to_buffer(old_buf);
 
-    // printf("fin bison\n");
-    // fflush(stdout);
     if (parsed_ok) {
         InstructionData *filedata = add_instruction_encrypt(clean_line);
         printf("Instruccion valida: %s\n", clean_line);
@@ -112,11 +112,10 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
             // error
             exit(1);
         }
-        printf("Alpha_arr lleno (%d)\n", second_offset);
-        print_alpha_arr(alpha_arr);
-        lines_decrypted = 0;
+        // printf("Alpha_arr lleno (%d)\n", second_offset);
+        // print_alpha_arr(alpha_arr);
+        lines_encrypted = 0;
         BEGIN(ENCRIPTADOR);
-         
     } else {
         fprintf(stderr, "Error, instruccion invalida: %s\n", clean_line);
         exit(1);
@@ -178,7 +177,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 <ENCABEZADO>[^\n] {
 	unsigned char c = yytext[0];
 	if (++first_offset == current_instr->first_offset) {
-	        printf("offset_encontrado: %c (%d)\n", c, c);
+	        // printf("offset_encontrado: %c (%d)\n", c, c);
 	        offset_encontrado = 1; 
 	        second_offset = c;  
     	}
@@ -186,7 +185,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 
 
 <FASTA>[^>\n\r ] {
-    printf("No en fasta: %c (%d) %s\n", yytext[0], curr_second_offset+1, curr_second_offset+1 == second_offset ? "true" : "false" );
+    // printf("No en fasta: %c (%d) %s\n", yytext[0], curr_second_offset+1, curr_second_offset+1 == second_offset ? "true" : "false" );
 	if (++curr_second_offset == second_offset) {
 	        if (!letra_en_arreglo(yytext[0], alpha_arr)) {
 	            agregar_si_no_existe(yytext[0], alpha_arr, &next_index, ALPHA_SIZE);
@@ -207,16 +206,28 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 
 <ENCRIPTADOR>[A-Za-z] {
     unsigned char c = toupper(yytext[0]) - 'A';
-    fputc(alpha_arr[c], stdout); 
+    fputc(alpha_arr[c], salida_encriptado); 
 }
 
 <ENCRIPTADOR>[ \t\r] {
-    fputc(yytext[0], stdout);
+    fputc(yytext[0], salida_encriptado);
 }
 
 <ENCRIPTADOR>\n {
-    fputc('\n', stdout);
-    lines_decrypted++; 
+    fputc('\n', salida_encriptado);
+    lines_encrypted++; 
+}
+
+<ENCRIPTADOR>^# {
+    unput('#');
+    current_instr->n_lines = lines_encrypted;
+    BEGIN(INSTRUCCION_EN);
+}
+
+<ENCRIPTADOR><<EOF>> {
+    lines_encrypted++; 
+    current_instr->n_lines = lines_encrypted;
+    yyterminate();
 }
 
 <ENCRIPTADOR>. {
@@ -289,7 +300,7 @@ InstructionData *add_instruction_encrypt(const char *line) {
     char filename[256];
     unsigned first_offset = 0, max_attempts = 0, n_lines = 0;
 
-    if (sscanf(p, "%255[^,],%u,%u", filename, &first_offset, &max_attempts/*, &n_lines*/) != 3) {
+    if (sscanf(p, "%255[^,],%u,%u", filename, &first_offset, &max_attempts) != 3) {
         fprintf(stderr, "Error al analizar la lÌnea: %s\n", line);
         exit(1);
         return NULL;
@@ -385,7 +396,7 @@ int fill_alpha_arr_encrypt(InstructionData *instr) {
     return 1;
 }
 
-int fill_alpha_arr(const char *fasta_path, unsigned int first_offset_param, unsigned int max_attempts) {
+int fill_alpha_arr(const char *fasta_path) {
     // se ignora first_offset_param porque se toma de la variable global, max attempts se ignora también (?)
     memcpy(alpha_arr, DEFAULT_ALPHA_ARR, ALPHA_SIZE);
     FILE *fasta = fopen(fasta_path, "r");
@@ -465,22 +476,37 @@ void modo_encriptador(const char *path) {
     instruccion_path[sizeof(instruccion_path) - 1] = '\0';
     set_base_path_from(instruccion_path);
     // ???
+    // creamos primer archivo de salida
+    char salida_path[512];
+    snprintf(salida_path, sizeof(salida_path), "%ssalida_encriptado.txt", base_path);
+    salida_encriptado = fopen(salida_path, "w");
+    if (!salida_encriptado) {
+        perror("No se pudo crear archivo de salida");
+        exit(1);
+    }
 
     printf("Modo ENCRIPTADOR: %s\n", path);
     BEGIN(INSTRUCCION_EN);
     yylex();
     fclose(yyin);
 
-    // creamos primer archivo de salida
-    char salida_path[512];
-    snprintf(salida_path, sizeof(salida_path), "%ssalida_encriptado.txt", base_path);
-    salida_desencriptado = fopen(salida_path, "w");
-    if (!salida_desencriptado) {
-        perror("No se pudo crear archivo de salida");
+    fclose(salida_encriptado);
+
+    printf("Archivo encriptado: '%s'\n\n", salida_path);
+    
+    // escribir "Instruction_to_decode.txt"
+    FILE* f_instructions_to_decode_txt = fopen("Instruction_to_decode.txt", "w");
+    if (!f_instructions_to_decode_txt) {
+        perror("No se pudo crear archivo 'Instructions_to_decode.txt'");
         exit(1);
     }
-    printf("Lineas encriptadas %d\n", lines_decrypted);
-    printf("\nArchivo encriptado: %s\n", salida_path);
+    for (int i = 0; i < instr_count; i++) {
+        current_instr = &instrucciones[i];
+        printf(">> Escribiendo a 'Instruction_to_decode.txt' %d/%d: ", i + 1, instr_count);
+        fprintf(f_instructions_to_decode_txt, "#%s,%d,%d,%d\n", current_instr->key_path, current_instr->first_offset, current_instr->max_attempts, current_instr->n_lines);
+        fprintf(stdout, "#%s,%d,%d,%d\n", current_instr->key_path, current_instr->first_offset, current_instr->max_attempts, current_instr->n_lines);
+    }
+    fclose(f_instructions_to_decode_txt);
 }
 
 void modo_desencriptador(const char *instrucciones_path, const char *cifrado_path) {
@@ -524,7 +550,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
         current_instr = &instrucciones[i];
         printf("\n>> Procesando instruccion %d/%d\n", i + 1, instr_count);
 
-        if (!fill_alpha_arr(current_instr->key_path, current_instr->first_offset, current_instr->max_attempts)) {
+        if (!fill_alpha_arr(current_instr->key_path)) {
             fprintf(stderr, "Error creando diccionario para %s\n", current_instr->key_path);
             fclose(cifrado);
             fclose(salida_desencriptado);
@@ -534,6 +560,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 
         BEGIN(DESENCRIPTADOR);
         yylex();
+        lines_decrypted = 0;
     }
 
     fclose(cifrado);
