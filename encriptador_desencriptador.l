@@ -9,6 +9,8 @@ extern int parsed_ok;
 extern void yy_switch_to_buffer(YY_BUFFER_STATE);
 extern YY_BUFFER_STATE yy_scan_string(const char *str);
 extern void yy_delete_buffer(YY_BUFFER_STATE buffer);
+extern int bison_encrypt_mode;
+extern int yydebug;
 
 #define MAX_INSTR 100
 #define ALPHA_SIZE 26
@@ -50,6 +52,8 @@ FILE *salida_desencriptado = NULL;
 char instruccion_path[512];
 char base_path[512] = {0};
 
+void print_alpha_arr(const unsigned char arr[ALPHA_SIZE]);
+InstructionData *add_instruction_encrypt(const char *line);
 void add_instruction(const char *line);
 int fill_alpha_arr(const char *fasta_path, unsigned int first_offset_param, unsigned int max_attempts);
 int letra_en_arreglo(unsigned char letra, const unsigned char arr[ALPHA_SIZE]);
@@ -69,11 +73,52 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 %x FASTA
 %x ENCABEZADO
 %x INSTRUCCION
+%x INSTRUCCION_EN
 
 %%
 
-#[^\n]* {
-    // instrucciones para encriptar
+<INSTRUCCION_EN>#[^\n]* {
+    char clean_line[512];
+    strncpy(clean_line, yytext + 1, sizeof(clean_line));
+    clean_line[sizeof(clean_line) - 1] = '\0';
+
+    char *p = clean_line;
+    while (*p) {
+        if (*p == '\n' || *p == '\r' || *p == '%') *p = '\0';
+        ++p;
+    }
+
+    // Ejecuta el parser con Bison
+    // printf("inicio bison\n");
+    YY_BUFFER_STATE old_buf = YY_CURRENT_BUFFER;
+    YY_BUFFER_STATE new_buf = yy_scan_string(clean_line);
+    parsed_ok = 0;
+    bison_encrypt_mode = 1;
+    yyparse();
+    yy_delete_buffer(new_buf);
+    yy_switch_to_buffer(old_buf);
+
+    // printf("fin bison\n");
+    // fflush(stdout);
+    if (parsed_ok) {
+        InstructionData *instructionData = add_instruction_encrypt(clean_line);
+        printf("Instruccion valida: %s\n", clean_line);
+        printf("antes fill\n");
+        print_alpha_arr(alpha_arr);
+        //printf("!!!!!!!! WOOO !!!!!!!!\n"); fflush(stdout);
+        
+        if (!fill_alpha_arr(instructionData->key_path, instructionData->first_offset, instructionData->max_attempts)) {
+            
+            fprintf(stderr, "Error creando diccionario para %s\n", instructionData->key_path);
+            exit(1);
+        }
+        print_alpha_arr(alpha_arr);
+        printf("después fill\n");
+
+    } else {
+        fprintf(stderr, "Error, instruccion invalida: %s\n", clean_line);
+        exit(1);
+    }
 }
 
 <INSTRUCCION>#[^\n]* {
@@ -91,6 +136,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
         YY_BUFFER_STATE old_buf = YY_CURRENT_BUFFER;
         YY_BUFFER_STATE new_buf = yy_scan_string(clean_line);
         parsed_ok = 0;
+        bison_encrypt_mode = 0;
         yyparse();
         yy_delete_buffer(new_buf);
         yy_switch_to_buffer(old_buf);
@@ -104,16 +150,16 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
     }
 }
 
-<INSTRUCCION>, {
+<INSTRUCCION,INSTRUCCION_EN>, {
     return ',';
 }
 
-<INSTRUCCION>[0-9]+ {
+<INSTRUCCION,INSTRUCCION_EN>[0-9]+ {
     yylval.num = atoi(yytext);
     return NUMBER;
 }
 
-<INSTRUCCION>[^,\n]+\.fasta {
+<INSTRUCCION,INSTRUCCION_EN>[^,\n]+\.fasta {
     yylval.str = strdup(yytext);
     return FILENAME;
 }
@@ -165,7 +211,9 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
     }
 }
 
-<ENCRIPTADOR>[ \t\r] { fputc(yytext[0], stdout); }
+<ENCRIPTADOR>[ \t\r] {
+    fputc(yytext[0], stdout);
+}
 
 <ENCRIPTADOR>\n {
     fputc('\n', stdout);
@@ -191,6 +239,14 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 
 %%
 
+void print_alpha_arr(const unsigned char arr[ALPHA_SIZE]){
+    printf("{");
+    for (int i = 0; i < ALPHA_SIZE; i++) {
+        printf("%d-%c: %c, ", i, DEFAULT_ALPHA_ARR[i], arr[i]);
+    }
+    printf("}\n");
+}
+
 int letra_en_arreglo(unsigned char letra, const unsigned char arr[ALPHA_SIZE]) {
     for (int i = 0; i < ALPHA_SIZE; i++) {
         if (arr[i] == letra) return 1; 
@@ -215,6 +271,40 @@ void agregar_si_no_existe(unsigned char letra, unsigned char *arr, unsigned int 
 }
 
 
+InstructionData *add_instruction_encrypt(const char *line) {
+    if (instr_count >= MAX_INSTR) {
+        fprintf(stderr, "Maximo de instrucciones alcanzado\n");
+        exit(1);
+    }
+
+    char buffer[512];
+    strncpy(buffer, line, sizeof(buffer));
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char *p = buffer;
+
+    char filename[256];
+    unsigned first_offset = 0, max_attempts = 0, n_lines = 0;
+
+    if (sscanf(p, "%255[^,],%u,%u", filename, &first_offset, &max_attempts/*, &n_lines*/) != 3) {
+        fprintf(stderr, "Error al analizar la lÌnea: %s\n", line);
+        exit(1);
+        return NULL;
+    }
+
+    char abs_path[512];
+    snprintf(abs_path, sizeof(abs_path), "%s%s", base_path, filename);
+
+    InstructionData *instr = &instrucciones[instr_count];
+    strncpy(instr->key_path, abs_path, sizeof(instr->key_path));
+    instr->key_path[sizeof(instr->key_path) - 1] = '\0';
+    instr->first_offset = first_offset;
+    instr->max_attempts = max_attempts;
+    instr->n_lines = n_lines;
+    
+    instr_count++;
+    return instr;
+}
 
 void add_instruction(const char *line) {
     if (instr_count >= MAX_INSTR) {
@@ -253,7 +343,7 @@ int fill_alpha_arr(const char *fasta_path, unsigned int first_offset_param, unsi
     memcpy(alpha_arr, DEFAULT_ALPHA_ARR, ALPHA_SIZE);
     FILE *fasta = fopen(fasta_path, "r");
     if (!fasta) {
-        perror("No se pudo abrir archivo FASTA");
+        fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", fasta_path);
         return 0;
     }
     
@@ -273,8 +363,7 @@ int fill_alpha_arr(const char *fasta_path, unsigned int first_offset_param, unsi
     file_stack[stack_ptr].position = ftell(yyin);  
     stack_ptr++;
 
-    yyin = fasta;
-    YY_BUFFER_STATE fasta_buf = yy_create_buffer(yyin, YY_BUF_SIZE);
+    YY_BUFFER_STATE fasta_buf = yy_create_buffer(fasta, YY_BUF_SIZE);
     yy_switch_to_buffer(fasta_buf);
     BEGIN(INITIAL);
 
@@ -318,19 +407,55 @@ void set_base_path_from(const char *full_path) {
 }
 
 void modo_encriptador(const char *path) {
+    //yyin: input de flex primero: archivo a encriptar 
     yyin = fopen(path, "r");
     if (!yyin) {
         perror("No se pudo abrir el archivo");
         exit(1);
     }
+    // ???
     strncpy(instruccion_path, path, sizeof(instruccion_path));
     instruccion_path[sizeof(instruccion_path) - 1] = '\0';
     set_base_path_from(instruccion_path);
+    // ???
 
-    printf("Modo ENCRIPTADOR:\n");
-    BEGIN(ENCRIPTADOR);
+    printf("Modo ENCRIPTADOR: %s\n", path);
+    BEGIN(INSTRUCCION_EN);
     yylex();
     fclose(yyin);
+
+    // creamos primer archivo de salida
+    char salida_path[512];
+    snprintf(salida_path, sizeof(salida_path), "%ssalida_encriptado.txt", base_path);
+    salida_desencriptado = fopen(salida_path, "w");
+    if (!salida_desencriptado) {
+        perror("No se pudo crear archivo de salida");
+        fclose(cifrado);
+        exit(1);
+    }
+    yyout = salida_desencriptado;
+    yyin = cifrado;
+
+    // Procesar instrucciones
+    for (int i = 0; i < instr_count; i++) {
+        current_instr = &instrucciones[i];
+        printf("\n>> Procesando instruccion %d/%d\n", i + 1, instr_count);
+
+        if (!fill_alpha_arr(current_instr->key_path, current_instr->first_offset, current_instr->max_attempts)) {
+            fprintf(stderr, "Error creando diccionario para %s\n", current_instr->key_path);
+            fclose(cifrado);
+            fclose(salida_desencriptado);
+            exit(1);
+        }
+        build_reverse_dict(alpha_arr, reverse_alpha_arr);
+
+        BEGIN(INSTRUCCION_EN);
+        yylex();
+    }
+
+    fclose(cifrado);
+    fclose(salida_desencriptado);
+    printf("\nArchivo desencriptado: %s\n", salida_path);
 }
 
 void modo_desencriptador(const char *instrucciones_path, const char *cifrado_path) {
@@ -392,6 +517,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
 }
 
 int main(int argc, char *argv[]) {
+    // yydebug = 1;
     if (argc == 2) {
         modo_encriptador(argv[1]);
     } else if (argc == 3) {
