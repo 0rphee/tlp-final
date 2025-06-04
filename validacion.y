@@ -50,9 +50,6 @@ instruction:
         parsed_n_lines = $7;
         parsed_ok = 1;
     }
-    | 'F' {
-        printf("whatever dude\n");
-    }
 ;
 
 %%

@@ -51,7 +51,7 @@ char base_path[512] = {0};
 void print_alpha_arr(const unsigned char arr[ALPHA_SIZE]);
 InstructionData *add_instruction_encrypt(const char *line);
 void add_instruction(const char *line);
-int fill_alpha_arr(const char *fasta_path);
+int fill_alpha_arr(const char *fasta_path, unsigned int max_attempts);
 int fill_alpha_arr_encrypt(InstructionData *instr);
 int letra_en_arreglo(unsigned char letra, const unsigned char arr[ALPHA_SIZE]);
 void agregar_si_no_existe(unsigned char letra, unsigned char *arr, unsigned int *count, int offset);
@@ -349,77 +349,89 @@ void add_instruction(const char *line) {
 
 int fill_alpha_arr_encrypt(InstructionData *instr) {
     memcpy(alpha_arr, DEFAULT_ALPHA_ARR, ALPHA_SIZE);
+    unsigned int intentos = 0;
+    int logrado = 0;
+	    current_instr = instr;
+	    first_offset = 0;
+	    second_offset = 0;
+	    curr_second_offset = 0;
+	    next_index = 0;
+
+	    YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
+
+	    while (true) {
+		// printf("intento: %d\n", curr_attempts);
+		FILE *fasta = fopen(instr->key_path, "r");
+		if (!fasta) {
+		    fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", instr->key_path);
+		    return 0;
+		}
+		// Obtener segundo offset y llenar alpha_arr
+		YY_BUFFER_STATE file_buffer = yy_create_buffer(fasta, YY_BUF_SIZE);
+		yy_switch_to_buffer(file_buffer);
+		BEGIN(INICIO_FASTA);
+		yylex();
+		
+		fclose(fasta);
+		yy_delete_buffer(file_buffer);
+		if (next_index >= ALPHA_SIZE-1){
+		    // printf("Diccionario llenado exitosamente\n");
+		    break;
+		}else if (current_instr->max_attempts <= curr_attempts){
+		    fprintf(stderr, "Error: Se agotaron los intentos permitidos.\n");
+		    return 0;
+		}
+		curr_attempts++;
+	    }
+    	    yy_switch_to_buffer(main_input_buffer);
     
-    current_instr = instr;
-    first_offset = 0;
-    second_offset = 0;
-    curr_second_offset = 0;
-    next_index = 0;
-    curr_attempts = 1;
-
-    YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
-
-    while (true) {
-        // printf("intento: %d\n", curr_attempts);
-        FILE *fasta = fopen(instr->key_path, "r");
-        if (!fasta) {
-            fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", instr->key_path);
-            return 0;
-        }
-        // Obtener segundo offset y llenar alpha_arr
-        YY_BUFFER_STATE file_buffer = yy_create_buffer(fasta, YY_BUF_SIZE);
-        yy_switch_to_buffer(file_buffer);
-        BEGIN(INICIO_FASTA);
-        yylex();
-        fclose(fasta);
-        yy_delete_buffer(file_buffer);
-        if (next_index >= ALPHA_SIZE-1){
-            // printf("Diccionario llenado exitosamente\n");
-            break;
-        }else if (current_instr->max_attempts <= curr_attempts){
-            fprintf(stderr, "Intentos maximos: %d de %d\n", curr_attempts, current_instr->max_attempts);
-            return 0;
-        }
-        curr_attempts++;
-    }
-    // Resume main buffer
-    yy_switch_to_buffer(main_input_buffer);
+    
     return 1;
 }
 
-int fill_alpha_arr(const char *fasta_path) {
-    // max attempts se pues la encriptación se encargó de verificarlo
+int fill_alpha_arr(const char *fasta_path, unsigned int max_attempts) {
+    
     memcpy(alpha_arr, DEFAULT_ALPHA_ARR, ALPHA_SIZE);
-    first_offset = 0;
-    second_offset = 0;
-    curr_second_offset = 0;
-    next_index = 0;
+                
+	    first_offset = 0;
+	    second_offset = 0;
+	    curr_second_offset = 0;
+	    next_index = 0;
 
-    YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
-    long main_buffer_position = ftell(yyin);
+	    YY_BUFFER_STATE main_input_buffer = YY_CURRENT_BUFFER;
+	    long main_buffer_position = ftell(yyin);
 
-    while (true){
-        FILE *fasta = fopen(fasta_path, "r");
-        if (!fasta) {
-            fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", fasta_path);
-            return 0;
-        }
+	    while (true){
+		FILE *fasta = fopen(fasta_path, "r");
+		if (!fasta) {
+		    fprintf(stderr, "No se pudo abrir archivo FASTA: %s\n", fasta_path);
+		    return 0;
+		}
 
-        yyin = fasta;
-        YY_BUFFER_STATE fasta_buffer = yy_create_buffer(yyin, YY_BUF_SIZE);
-        yy_switch_to_buffer(fasta_buffer);
-        BEGIN(INICIO_FASTA);
-        yylex();
-        fclose(fasta);
-        yy_delete_buffer(fasta_buffer);
+		yyin = fasta;
+		YY_BUFFER_STATE fasta_buffer = yy_create_buffer(yyin, YY_BUF_SIZE);
+		yy_switch_to_buffer(fasta_buffer);
+		BEGIN(INICIO_FASTA);
+		yylex();
+		
+		fclose(fasta);
+		yy_delete_buffer(fasta_buffer);
 
-        if (next_index >= ALPHA_SIZE-1){
-            // printf("Diccionario llenado exitosamente\n");
-            break;
-        }  
-    }
-    yy_switch_to_buffer(main_input_buffer);
-    fseek(yyin, main_buffer_position, SEEK_SET);
+		if (next_index >= ALPHA_SIZE-1){
+			// printf("Diccionario llenado exitosamente\n");
+			break;
+		}else if (current_instr->max_attempts <= curr_attempts){
+			fprintf(stderr, "Error: Se agotaron los intentos permitidos.\n");
+			return 0;
+		}
+		curr_attempts++;
+	    }
+	    
+	    yy_switch_to_buffer(main_input_buffer);
+	    fseek(yyin, main_buffer_position, SEEK_SET);
+	    
+  
+    
     return 1;
 }
 
@@ -533,7 +545,7 @@ void modo_desencriptador(const char *instrucciones_path, const char *cifrado_pat
         current_instr = &instrucciones[i];
         printf("\n>> Procesando instruccion %d/%d\n", i + 1, instr_count);
 
-        if (!fill_alpha_arr(current_instr->key_path)) {
+        if (!fill_alpha_arr(current_instr->key_path, current_instr->max_attempts)) {
             fprintf(stderr, "Error creando diccionario para %s\n", current_instr->key_path);
             fclose(cifrado);
             fclose(salida_desencriptado);
